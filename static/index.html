@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SB Farma | Radar de Pré-Vencidos — Prevenção de Perdas</title>
+    <link rel="icon" type="image/png" href="/static/icon-sb.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        html { scroll-behavior: smooth; }
+        body {
+            background-color: #050507;
+            background-image:
+                radial-gradient(circle at 12% -10%, rgba(244, 63, 94, 0.13), transparent 34%),
+                radial-gradient(circle at 88% 0%, rgba(245, 158, 11, 0.10), transparent 30%),
+                radial-gradient(circle at 50% 100%, rgba(99, 102, 241, 0.08), transparent 38%);
+            background-attachment: fixed;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.55);
+        }
+        .glass-card-hover { transition: all 0.25s ease; }
+        .glass-card-hover:hover {
+            border-color: rgba(255, 255, 255, 0.16);
+            box-shadow: 0 12px 40px 0 rgba(244, 63, 94, 0.12);
+            transform: translateY(-2px);
+        }
+        .glass-input {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color-scheme: dark;
+        }
+        .glass-input:focus {
+            outline: none;
+            border-color: rgba(244, 63, 94, 0.5);
+            box-shadow: 0 0 15px rgba(244, 63, 94, 0.2);
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(244, 63, 94, 0.4); }
+        @keyframes shimmerLoading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        .animate-shimmer-bar { animation: shimmerLoading 1.5s infinite; }
+        .risk-critical {
+            box-shadow: inset 3px 0 0 #f43f5e, 0 0 26px rgba(244, 63, 94, 0.10);
+            background: rgba(244, 63, 94, 0.07);
+        }
+        .risk-high {
+            box-shadow: inset 3px 0 0 #fb923c;
+            background: rgba(251, 146, 60, 0.05);
+        }
+        .heat-cell { transition: filter 0.15s ease, transform 0.15s ease; cursor: default; }
+        .heat-cell:hover { filter: brightness(1.35); transform: scale(1.02); }
+        table.sticky-head thead th { position: sticky; top: 0; z-index: 10; }
+        .num { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen p-3 md:p-6 font-sans antialiased selection:bg-rose-500 selection:text-white">
+
+    <!-- OVERLAY DE CARREGAMENTO -->
+    <div id="loading-overlay" class="fixed inset-0 z-50 hidden flex-col items-center justify-center bg-black/80 backdrop-blur-xl transition-all duration-300">
+        <div class="relative p-8 md:p-10 rounded-3xl bg-slate-950/90 border border-rose-500/30 shadow-[0_0_60px_rgba(244,63,94,0.22)] flex flex-col items-center text-center max-w-sm w-full mx-4 overflow-hidden">
+            <div class="absolute -top-12 -left-12 w-40 h-40 bg-rose-600/25 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -bottom-12 -right-12 w-40 h-40 bg-amber-500/20 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="relative w-20 h-20 flex items-center justify-center my-2">
+                <div class="absolute inset-0 rounded-full border-2 border-transparent border-t-rose-500 border-r-rose-500 animate-spin"></div>
+                <div class="absolute inset-2 rounded-full border-2 border-transparent border-b-amber-400 border-l-amber-400 animate-[spin_1.5s_linear_infinite_reverse]"></div>
+                <div class="w-11 h-11 rounded-2xl bg-rose-500/10 border border-rose-400/30 flex items-center justify-center shadow-[0_0_15px_rgba(244,63,94,0.4)] p-2">
+                    <img src="/static/icon-sb.png" alt="SB Farma" class="w-full h-full object-contain animate-pulse">
+                </div>
+            </div>
+            <div class="space-y-1 z-10 mt-3">
+                <h3 id="loading-texto" class="text-base font-bold bg-gradient-to-r from-rose-200 via-white to-amber-200 bg-clip-text text-transparent tracking-wide">
+                    Analisando riscos...
+                </h3>
+                <p class="text-xs text-slate-400 font-medium">Consultando banco PostgreSQL</p>
+            </div>
+            <div class="w-48 h-1 bg-slate-800/80 rounded-full overflow-hidden mt-5 relative border border-white/5">
+                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-rose-500 to-transparent animate-shimmer-bar w-full h-full"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-[1560px] mx-auto space-y-6">
+
+        <!-- HEADER -->
+        <header class="glass-card rounded-3xl p-5 border border-white/10">
+            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
+                <div class="flex items-center gap-4">
+                    <div class="p-2 bg-white/5 rounded-2xl border border-white/10 shadow-inner shrink-0">
+                        <img src="/static/SB_farma_oficial_branco.png" alt="SB Farma" class="h-9 object-contain">
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h1 class="text-xl font-bold text-white tracking-tight">Radar de Pré-Vencidos</h1>
+                            <span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">Prevenção de Perdas</span>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-0.5">Lotes em prevenção das categorias estratégicas — vencimentos, conversão e prioridades de intervenção</p>
+                    </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div id="cache-indicador" class="hidden items-center gap-3 px-4 py-2.5 rounded-2xl bg-slate-950/70 border border-white/10">
+                        <span class="relative flex h-2.5 w-2.5">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+                            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                        </span>
+                        <div class="leading-tight">
+                            <p id="cache-status-texto" class="text-[11px] font-semibold text-slate-200">Carregando...</p>
+                            <p id="cache-registros" class="text-[10px] text-slate-500"></p>
+                        </div>
+                    </div>
+                    <button id="btn-atualizar" onclick="carregarDados(true)" class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold text-white bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 shadow-lg shadow-rose-900/40 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        Atualizar do banco
+                    </button>
+                </div>
+            </div>
+
+            <!-- FILTROS -->
+            <div class="mt-5 pt-4 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+                <div>
+                    <label for="data-inicio" class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Início do período</label>
+                    <input id="data-inicio" type="date" class="glass-input w-full rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200">
+                </div>
+                <div>
+                    <label for="data-fim" class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Fim do período</label>
+                    <input id="data-fim" type="date" class="glass-input w-full rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200">
+                </div>
+                <div>
+                    <label for="dias-sem-venda" class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Sem venda há</label>
+                    <select id="dias-sem-venda" class="glass-input w-full rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200">
+                        <option value="30">30 dias</option>
+                        <option value="60">60 dias</option>
+                        <option value="90" selected>90 dias</option>
+                        <option value="180">180 dias</option>
+                        <option value="365">365 dias</option>
+                    </select>
+                </div>
+                <button onclick="carregarDados(false)" class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-200 bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+                    Aplicar filtros
+                </button>
+                <p id="texto-periodo" class="text-[11px] text-slate-500 lg:text-right pb-1.5">Período: —</p>
+            </div>
+
+            <div class="mt-3 flex flex-col lg:flex-row lg:items-center gap-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">Categorias</span>
+                <div id="categorias-filtro" class="flex flex-wrap gap-1.5"></div>
+            </div>
+
+            <div id="erro-banner" class="hidden mt-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200"></div>
+        </header>
+
+        <!-- ALERTA DE INTERVENÇÃO -->
+        <section id="alerta-intervencao" class="hidden rounded-2xl border border-rose-500/35 bg-gradient-to-r from-rose-950/70 via-rose-900/25 to-transparent px-5 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div class="flex items-start gap-3">
+                <div class="p-2 rounded-xl bg-rose-500/20 border border-rose-400/30 text-rose-300 shrink-0">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                </div>
+                <div>
+                    <p id="alerta-titulo" class="text-sm font-bold text-rose-100">Lojas exigindo intervenção imediata</p>
+                    <p id="alerta-detalhe" class="text-xs text-rose-200/70 mt-0.5"></p>
+                </div>
+            </div>
+            <a href="#ranking" class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-500 transition-all shrink-0">
+                Ver ranking
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+            </a>
+        </section>
+
+        <!-- KPIs -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <article class="glass-card glass-card-hover rounded-2xl p-4 relative overflow-hidden">
+                <div class="absolute -right-8 -top-8 w-24 h-24 rounded-full bg-emerald-500/10 blur-2xl"></div>
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Conversão pré-vencidos</p>
+                    <span class="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M21 7v5h-5"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-conversao" class="text-3xl font-black text-white mt-2 num">—</p>
+                <p id="kpi-conversao-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+                <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden mt-3">
+                    <div id="kpi-conversao-barra" class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-700" style="width:0%"></div>
+                </div>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Estoque em prevenção</p>
+                    <span class="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-estoque-qtd" class="text-3xl font-black text-white mt-2 num">—</p>
+                <p id="kpi-estoque-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Estoque a custo</p>
+                    <span class="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-estoque-valor" class="text-3xl font-black text-white mt-2 num">—</p>
+                <p class="text-[11px] text-slate-400 mt-1">Custo atual do cadastro do produto/loja</p>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Vendas de pré-vencidos</p>
+                    <span class="p-1.5 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-vendas" class="text-3xl font-black text-white mt-2 num">—</p>
+                <p id="kpi-vendas-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Transferências de prevenção</p>
+                    <span class="p-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-transferencias" class="text-3xl font-black text-white mt-2 num">—</p>
+                <p id="kpi-transferencias-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4 relative overflow-hidden">
+                <div class="absolute -right-8 -top-8 w-24 h-24 rounded-full bg-rose-500/15 blur-2xl"></div>
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Estoque já vencido</p>
+                    <span class="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-vencido" class="text-3xl font-black text-rose-300 mt-2 num">—</p>
+                <p id="kpi-vencido-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Vence em até 30 dias</p>
+                    <span class="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-d30" class="text-3xl font-black text-amber-300 mt-2 num">—</p>
+                <p id="kpi-d30-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                    <p id="kpi-sem-venda-titulo" class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sem venda há 90 dias</p>
+                    <span class="p-1.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-sem-venda" class="text-3xl font-black text-orange-300 mt-2 num">—</p>
+                <p id="kpi-sem-venda-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+            </article>
+
+            <article class="glass-card glass-card-hover rounded-2xl p-4 relative overflow-hidden">
+                <div class="absolute -right-8 -top-8 w-24 h-24 rounded-full bg-violet-500/15 blur-2xl"></div>
+                <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Vendas sem vínculo de lote</p>
+                    <span class="p-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </span>
+                </div>
+                <p id="kpi-sem-lote" class="text-3xl font-black text-violet-300 mt-2 num">—</p>
+                <p id="kpi-sem-lote-sub" class="text-[11px] text-slate-400 mt-1">—</p>
+            </article>
+        </section>
+
+        <!-- GRÁFICOS: VENCIMENTOS E EXPOSIÇÃO -->
+        <section class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <article class="glass-card rounded-2xl p-5 xl:col-span-2">
+                <div class="flex items-start justify-between gap-3 mb-4">
+                    <div>
+                        <h2 class="text-sm font-bold text-white">Vencimentos projetados por mês</h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Saldo em prevenção a custo · próximos 12 meses</p>
+                    </div>
+                    <div class="flex items-center gap-3 text-[10px] text-slate-400">
+                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500"></span>Valor</span>
+                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>Unidades</span>
+                    </div>
+                </div>
+                <div class="h-[280px]"><canvas id="chart-mensal"></canvas></div>
+            </article>
+
+            <article class="glass-card rounded-2xl p-5">
+                <div>
+                    <h2 class="text-sm font-bold text-white">Exposição por faixa</h2>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Risco de perda do estoque em prevenção</p>
+                </div>
+                <div class="h-[220px] mt-3"><canvas id="chart-exposicao"></canvas></div>
+                <div id="exposicao-legenda" class="space-y-2 mt-2"></div>
+            </article>
+        </section>
+
+        <!-- CONVERSÃO E SEM VENDA -->
+        <section class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <article class="glass-card rounded-2xl p-5">
+                <div>
+                    <h2 class="text-sm font-bold text-white">Conversão de itens em prevenção</h2>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Destino das unidades movimentadas no período</p>
+                </div>
+                <div class="relative h-[210px] mt-2">
+                    <canvas id="chart-conversao"></canvas>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span id="conversao-centro" class="text-3xl font-black text-white">—</span>
+                        <span class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">conversão</span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <div class="rounded-xl bg-emerald-500/5 border border-emerald-500/15 px-3 py-2">
+                        <p class="text-[9px] uppercase tracking-wider text-emerald-300/70 font-bold">Vendidas</p>
+                        <p id="conv-vendidas" class="text-sm font-bold text-emerald-300 num">—</p>
+                    </div>
+                    <div class="rounded-xl bg-rose-500/5 border border-rose-500/15 px-3 py-2">
+                        <p class="text-[9px] uppercase tracking-wider text-rose-300/70 font-bold">Baixadas</p>
+                        <p id="conv-baixadas" class="text-sm font-bold text-rose-300 num">—</p>
+                    </div>
+                    <div class="rounded-xl bg-slate-500/5 border border-white/10 px-3 py-2">
+                        <p class="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Outras saídas</p>
+                        <p id="conv-outras" class="text-sm font-bold text-slate-300 num">—</p>
+                    </div>
+                    <div class="rounded-xl bg-sky-500/5 border border-sky-500/15 px-3 py-2">
+                        <p class="text-[9px] uppercase tracking-wider text-sky-300/70 font-bold">Valor vendido</p>
+                        <p id="conv-valor" class="text-sm font-bold text-sky-300 num">—</p>
+                    </div>
+                </div>
+            </article>
+
+            <article class="glass-card rounded-2xl p-5 xl:col-span-2">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <h2 id="titulo-sem-venda" class="text-sm font-bold text-white">Estoque sem venda no período</h2>
+                        <p id="subtitulo-sem-venda" class="text-[11px] text-slate-500 mt-0.5">Top lojas por valor parado</p>
+                    </div>
+                    <div class="text-right shrink-0">
+                        <p id="sem-venda-total" class="text-lg font-black text-orange-300 num">—</p>
+                        <p id="sem-venda-total-sub" class="text-[10px] text-slate-500">—</p>
+                    </div>
+                </div>
+                <div class="h-[290px] mt-3"><canvas id="chart-sem-venda"></canvas></div>
+            </article>
+        </section>
+
+        <!-- MATRIZ VENCIMENTOS -->
+        <section class="glass-card rounded-2xl p-5">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-bold text-white">Vencimento por loja e por mês</h2>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Valor do saldo em prevenção por mês de validade · quanto mais intenso, maior o risco</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label for="select-loja-mensal" class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Loja</label>
+                    <select id="select-loja-mensal" onchange="renderMatriz()" class="glass-input rounded-xl px-3 py-2 text-xs font-medium text-slate-200 min-w-[150px]">
+                        <option value="todas">Todas as lojas</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-4 overflow-auto max-h-[560px] rounded-xl border border-white/5">
+                <table class="w-full text-[11px] border-collapse min-w-[1050px]">
+                    <thead class="bg-slate-950/90 text-slate-400 uppercase text-[9px] font-bold tracking-wider sticky top-0 z-10">
+                        <tr id="matriz-head"></tr>
+                    </thead>
+                    <tbody id="matriz-corpo"></tbody>
+                    <tfoot id="matriz-total" class="bg-slate-950/80"></tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- RANKING DE INTERVENÇÃO -->
+        <section id="ranking" class="glass-card rounded-2xl p-5">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-sm font-bold text-white">Lojas que exigem intervenção imediata</h2>
+                        <span id="badge-criticas" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">—</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Score ponderado: vencidos (3x) · 30 dias (2x) · 60–90 dias (1x) · estoque parado (1,5x)</p>
+                </div>
+                <p class="text-[10px] text-slate-500">Top 3 = crítico · 4 a 8 = alto · 9 a 15 = médio</p>
+            </div>
+            <div class="mt-4 overflow-auto max-h-[520px] rounded-xl border border-white/5">
+                <table class="w-full text-xs border-collapse min-w-[980px]">
+                    <thead class="bg-slate-950/90 text-slate-400 uppercase text-[9px] font-bold tracking-wider sticky top-0 z-10">
+                        <tr>
+                            <th class="px-3 py-3 text-left">#</th>
+                            <th class="px-3 py-3 text-left">Loja</th>
+                            <th class="px-3 py-3 text-left">Nível</th>
+                            <th class="px-3 py-3 text-left w-40">Score</th>
+                            <th class="px-3 py-3 text-right">Vencido</th>
+                            <th class="px-3 py-3 text-right">≤ 30 dias</th>
+                            <th class="px-3 py-3 text-right">Sem venda</th>
+                            <th class="px-3 py-3 text-right">Conversão</th>
+                            <th class="px-3 py-3 text-left">Sinais</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ranking-corpo"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- DETALHAMENTO DE ITENS -->
+        <section class="space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-bold text-white">Itens para ação</h2>
+                    <p class="text-[11px] text-slate-500 mt-0.5">Priorize os maiores valores por loja</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label for="select-loja-itens" class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Loja</label>
+                    <select id="select-loja-itens" onchange="renderTopItens()" class="glass-input rounded-xl px-3 py-2 text-xs font-medium text-slate-200 min-w-[150px]">
+                        <option value="todas">Todas as lojas</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <article class="glass-card rounded-2xl p-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-white">Vencidos e a vencer em 90 dias</h3>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Saldo em prevenção com maior urgência</p>
+                        </div>
+                        <span class="text-[10px] font-bold px-2 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20">Até 200 itens</span>
+                    </div>
+                    <div class="mt-3 overflow-auto max-h-[430px] rounded-xl border border-white/5">
+                        <table class="w-full text-[11px] border-collapse min-w-[620px]">
+                            <thead class="bg-slate-950/90 text-slate-400 uppercase text-[9px] font-bold tracking-wider sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left">Loja</th>
+                                    <th class="px-3 py-2.5 text-left">Produto / Lote</th>
+                                    <th class="px-3 py-2.5 text-left">Validade</th>
+                                    <th class="px-3 py-2.5 text-right">Qtd</th>
+                                    <th class="px-3 py-2.5 text-right">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-vencendo-corpo"></tbody>
+                        </table>
+                    </div>
+                </article>
+
+                <article class="glass-card rounded-2xl p-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 id="titulo-top-sem-venda" class="text-sm font-bold text-white">Sem venda há 90 dias</h3>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Maiores valores de estoque parado</p>
+                        </div>
+                        <span class="text-[10px] font-bold px-2 py-1 rounded-lg bg-orange-500/10 text-orange-300 border border-orange-500/20">Até 200 itens</span>
+                    </div>
+                    <div class="mt-3 overflow-auto max-h-[430px] rounded-xl border border-white/5">
+                        <table class="w-full text-[11px] border-collapse min-w-[560px]">
+                            <thead class="bg-slate-950/90 text-slate-400 uppercase text-[9px] font-bold tracking-wider sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left">Loja</th>
+                                    <th class="px-3 py-2.5 text-left">Produto / Lote</th>
+                                    <th class="px-3 py-2.5 text-left">Validade</th>
+                                    <th class="px-3 py-2.5 text-right">Qtd</th>
+                                    <th class="px-3 py-2.5 text-right">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-sem-venda-corpo"></tbody>
+                        </table>
+                    </div>
+                </article>
+
+                <article class="glass-card rounded-2xl p-5 xl:col-span-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-white">Possíveis vendas sem vínculo de lote</h3>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Vendas de produtos com lote em prevenção ativo na data, mas sem apontamento do lote — risco de desconto não aplicado</p>
+                        </div>
+                        <span class="text-[10px] font-bold px-2 py-1 rounded-lg bg-violet-500/10 text-violet-300 border border-violet-500/20">Até 200 itens</span>
+                    </div>
+                    <div class="mt-3 overflow-auto max-h-[430px] rounded-xl border border-white/5">
+                        <table class="w-full text-[11px] border-collapse min-w-[620px]">
+                            <thead class="bg-slate-950/90 text-slate-400 uppercase text-[9px] font-bold tracking-wider sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left">Loja</th>
+                                    <th class="px-3 py-2.5 text-left">Data</th>
+                                    <th class="px-3 py-2.5 text-left">Produto</th>
+                                    <th class="px-3 py-2.5 text-left">Categoria</th>
+                                    <th class="px-3 py-2.5 text-right">Qtd</th>
+                                    <th class="px-3 py-2.5 text-right">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-sem-lote-corpo"></tbody>
+                        </table>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <!-- FOOTER -->
+        <footer class="glass-card rounded-2xl p-5 text-[11px] text-slate-500">
+            <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div class="space-y-1.5">
+                    <p class="font-bold text-slate-300 uppercase tracking-wider text-[10px]">Notas metodológicas</p>
+                    <ul id="notas-metodologicas" class="list-disc list-inside space-y-1 marker:text-slate-600"></ul>
+                </div>
+                <p id="rodape-atualizacao" class="shrink-0 lg:text-right">—</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const state = {
+            dados: null,
+            charts: {},
+            maxScore: 1,
+        };
+
+        const CATEGORIAS = [
+            { chave: 'ETICO', nome: 'Éticos' },
+            { chave: 'GENERICOS', nome: 'Genéricos' },
+            { chave: 'SIMILARES', nome: 'Similares' },
+            { chave: 'DIAMANTES', nome: 'Diamantes' },
+            { chave: 'PERFUMARIA', nome: 'Perfumaria' },
+            { chave: 'CONVENIENCIA', nome: 'Conveniência' },
+            { chave: 'LEITES E FRALDAS', nome: 'Leites e Fraldas' },
+        ];
+
+        function popularCategorias() {
+            const container = document.getElementById('categorias-filtro');
+            container.innerHTML = CATEGORIAS.map(c => `
+                <label class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[11px] text-slate-300 cursor-pointer hover:bg-white/10 transition-all">
+                    <input type="checkbox" value="${c.chave}" checked class="accent-rose-500 w-3.5 h-3.5">
+                    ${c.nome}
+                </label>`).join('');
+        }
+
+        const CORES = {
+            rose: '#f43f5e',
+            orange: '#fb923c',
+            amber: '#f59e0b',
+            emerald: '#10b981',
+            teal: '#14b8a6',
+            indigo: '#6366f1',
+            slate: '#64748b',
+        };
+
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        Chart.defaults.font.size = 10;
+        Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+
+        function fmtMoeda(valor, casas = 0) {
+            return (valor || 0).toLocaleString('pt-BR', {
+                style: 'currency', currency: 'BRL',
+                minimumFractionDigits: casas, maximumFractionDigits: casas
+            });
+        }
+        function fmtCompacto(valor) {
+            const v = Number(valor) || 0;
+            const abs = Math.abs(v);
+            if (abs >= 1e9) return 'R$ ' + (v / 1e9).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' bi';
+            if (abs >= 1e6) return 'R$ ' + (v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mi';
+            if (abs >= 1e3) return 'R$ ' + (v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + ' mil';
+            return fmtMoeda(v, 0);
+        }
+        function fmtNumero(valor, casas = 0) {
+            return (Number(valor) || 0).toLocaleString('pt-BR', {
+                minimumFractionDigits: casas, maximumFractionDigits: casas
+            });
+        }
+        function fmtQtd(v) {
+            const n = Number(v) || 0;
+            if (Math.abs(n) >= 1e6) return (n / 1e6).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' mi';
+            if (Math.abs(n) >= 1e3) return (n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + ' mil';
+            return fmtNumero(n, 0);
+        }
+        function fmtPct(v) {
+            return (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+        }
+        function fmtDataBR(iso) {
+            if (!iso) return '—';
+            const [a, m, d] = String(iso).slice(0, 10).split('-');
+            return d + '/' + m + '/' + a;
+        }
+        function fmtMes(ym) {
+            if (!ym) return '';
+            const [a, m] = ym.split('-');
+            const nomes = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+            return nomes[Number(m) - 1] + '/' + a.slice(2);
+        }
+        function fmtValorCelula(v) {
+            if (!v) return '—';
+            if (v >= 1e6) return (v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'M';
+            if (v >= 1e3) return (v / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + 'k';
+            return fmtNumero(v, 0);
+        }
+        function isoHoje() {
+            const d = new Date();
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        function isoDiasAtras(dias) {
+            const d = new Date();
+            d.setDate(d.getDate() - dias);
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        function exibirLoading(mensagem) {
+            const overlay = document.getElementById('loading-overlay');
+            document.getElementById('loading-texto').innerText = mensagem || 'Analisando riscos...';
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+        }
+        function ocultarLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            overlay.classList.add('hidden');
+            overlay.classList.remove('flex');
+        }
+
+        function mostrarErro(mensagem) {
+            const el = document.getElementById('erro-banner');
+            el.innerText = mensagem;
+            el.classList.remove('hidden');
+        }
+        function limparErro() {
+            document.getElementById('erro-banner').classList.add('hidden');
+        }
+
+        function formatarTempoCache(ts) {
+            if (!ts) return null;
+            const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+            if (diff < 60) return 'Atualizado agora';
+            const min = Math.floor(diff / 60);
+            if (min < 60) return 'Atualizado há ' + min + ' min';
+            const h = Math.floor(min / 60);
+            if (h < 24) return 'Atualizado há ' + h + ' h';
+            return 'Atualizado há ' + Math.floor(h / 24) + ' d';
+        }
+
+        async function atualizarIndicadorCache() {
+            const indicador = document.getElementById('cache-indicador');
+            try {
+                const res = await fetch('/api/status');
+                if (!res.ok) throw new Error('status ' + res.status);
+                const st = await res.json();
+                const info = st.dashboard;
+                const texto = document.getElementById('cache-status-texto');
+                const registros = document.getElementById('cache-registros');
+                const rotulo = formatarTempoCache(info.timestamp);
+                if (!rotulo) {
+                    texto.innerText = 'Dados ainda não carregados';
+                    registros.innerText = '';
+                } else {
+                    texto.innerText = rotulo;
+                    const expira = Math.max(0, Math.ceil((info.timestamp + st.ttl_segundos - Date.now() / 1000) / 60));
+                    registros.innerText = 'Cache de 15 min · expira em ' + expira + ' min';
+                }
+                indicador.classList.remove('hidden');
+                indicador.classList.add('flex');
+            } catch (e) {
+                indicador.classList.add('hidden');
+                indicador.classList.remove('flex');
+            }
+        }
+
+        async function carregarDados(forcar) {
+            const inicio = document.getElementById('data-inicio').value;
+            const fim = document.getElementById('data-fim').value;
+            const dias = document.getElementById('dias-sem-venda').value;
+            if (!inicio || !fim) {
+                mostrarErro('Informe as datas de início e fim do período.');
+                return;
+            }
+            const categorias = [...document.querySelectorAll('#categorias-filtro input:checked')].map(el => el.value);
+            if (!categorias.length) {
+                mostrarErro('Selecione ao menos uma categoria.');
+                return;
+            }
+            limparErro();
+            exibirLoading(forcar ? 'Atualizando direto do banco...' : 'Analisando pré-vencidos...');
+            try {
+                const params = new URLSearchParams({
+                    data_inicio: inicio,
+                    data_fim: fim,
+                    dias_sem_venda: dias,
+                    categorias: categorias.join(','),
+                });
+                if (forcar) params.set('forcar_atualizacao', 'true');
+                const res = await fetch('/api/dashboard?' + params.toString());
+                if (!res.ok) {
+                    const corpo = await res.json().catch(() => ({}));
+                    throw new Error(corpo.mensagem || corpo.detail || 'Falha ao consultar o dashboard.');
+                }
+                state.dados = await res.json();
+                renderizarTudo();
+                atualizarIndicadorCache();
+            } catch (error) {
+                console.error(error);
+                mostrarErro('Não foi possível carregar os dados: ' + error.message);
+            } finally {
+                ocultarLoading();
+            }
+        }
+
+        function renderizarTudo() {
+            if (!state.dados) return;
+            renderizarPeriodo();
+            renderizarKpis();
+            renderizarAlerta();
+            renderizarGraficoMensal();
+            renderizarExposicao();
+            renderizarConversao();
+            renderizarSemVenda();
+            popularSelectsLojas();
+            renderMatriz();
+            renderRanking();
+            renderTopItens();
+            renderizarNotas();
+        }
+
+        function renderizarPeriodo() {
+            const p = state.dados.periodo;
+            document.getElementById('texto-periodo').innerText =
+                'Vendas e transferências: ' + fmtDataBR(p.data_inicio) + ' a ' + fmtDataBR(p.data_fim) + ' · sem venda há ' + p.dias_sem_venda + ' dias';
+            document.getElementById('rodape-atualizacao').innerText =
+                'Consulta gerada em ' + new Date().toLocaleString('pt-BR');
+        }
+
+        function renderizarKpis() {
+            const k = state.dados.kpis;
+            document.getElementById('kpi-conversao').innerText = fmtPct(k.conversao_pct);
+            document.getElementById('kpi-conversao-sub').innerText =
+                fmtQtd(k.prevencao_vendidas) + ' vendidas de ' + fmtQtd(k.prevencao_movimentada) + ' unidades movimentadas';
+            document.getElementById('kpi-conversao-barra').style.width = Math.min(100, Math.max(0, k.conversao_pct)) + '%';
+
+            document.getElementById('kpi-estoque-qtd').innerText = fmtQtd(k.estoque_qtd) + ' un.';
+            document.getElementById('kpi-estoque-sub').innerText =
+                fmtNumero(k.estoque_lotes) + ' lotes · ' + fmtNumero(k.estoque_skus) + ' SKUs com saldo';
+
+            document.getElementById('kpi-estoque-valor').innerText = fmtCompacto(k.estoque_valor);
+
+            document.getElementById('kpi-vendas').innerText = fmtCompacto(k.vendas_valor);
+            document.getElementById('kpi-vendas-sub').innerText =
+                fmtNumero(k.vendas_itens) + ' itens · ' + fmtQtd(k.vendas_qtd) + ' peças';
+
+            document.getElementById('kpi-transferencias').innerText = fmtCompacto(k.transferencias_valor);
+            document.getElementById('kpi-transferencias-sub').innerText = fmtQtd(k.transferencias_qtd) + ' peças recebidas';
+
+            document.getElementById('kpi-vencido').innerText = fmtCompacto(k.vencido_valor);
+            document.getElementById('kpi-vencido-sub').innerText = 'Perda potencial já consumada';
+
+            document.getElementById('kpi-d30').innerText = fmtCompacto(k.d30_valor);
+            document.getElementById('kpi-d30-sub').innerText = 'Ação de queima/transferência urgente';
+
+            document.getElementById('kpi-sem-venda-titulo').innerText = 'Sem venda há ' + state.dados.periodo.dias_sem_venda + ' dias';
+            document.getElementById('kpi-sem-venda').innerText = fmtCompacto(k.sem_venda_valor);
+            document.getElementById('kpi-sem-venda-sub').innerText =
+                fmtNumero(k.sem_venda_lotes) + ' lotes · ' + fmtQtd(k.sem_venda_qtd) + ' unidades';
+
+            document.getElementById('kpi-sem-lote').innerText = fmtCompacto(k.sem_lote_valor);
+            document.getElementById('kpi-sem-lote-sub').innerText =
+                fmtNumero(k.sem_lote_itens) + ' itens · ' + fmtQtd(k.sem_lote_qtd) + ' unidades';
+        }
+
+        function renderizarAlerta() {
+            const k = state.dados.kpis;
+            const secao = document.getElementById('alerta-intervencao');
+            const criticas = state.dados.lojas.filter(l => l.risco_nivel === 'Crítico');
+            if (!criticas.length) {
+                secao.classList.add('hidden');
+                return;
+            }
+            secao.classList.remove('hidden');
+            document.getElementById('alerta-titulo').innerText =
+                criticas.length + ' loja' + (criticas.length > 1 ? 's' : '') + ' em situação crítica';
+            document.getElementById('alerta-detalhe').innerText =
+                'Prioridade: ' + criticas.map(l => 'Loja ' + l.codigo).join(' · ') +
+                ' — ' + fmtCompacto(k.vencido_valor) + ' já vencidos e ' + fmtCompacto(k.d30_valor) + ' vencendo em 30 dias.';
+        }
+
+        function destruirChart(nome) {
+            if (state.charts[nome]) {
+                state.charts[nome].destroy();
+                state.charts[nome] = null;
+            }
+        }
+
+        function renderizarGraficoMensal() {
+            destruirChart('mensal');
+            const mapa = {};
+            state.dados.vencimentos_mensal.forEach(r => {
+                if (!mapa[r.mes]) mapa[r.mes] = { valor: 0, qtd: 0 };
+                mapa[r.mes].valor += r.valor;
+                mapa[r.mes].qtd += r.qtd;
+            });
+            const meses = Object.keys(mapa).sort();
+            const valores = meses.map(m => mapa[m].valor);
+            const qtds = meses.map(m => mapa[m].qtd);
+            const ctx = document.getElementById('chart-mensal');
+            state.charts.mensal = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: meses.map(fmtMes),
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Valor (R$)',
+                            data: valores,
+                            backgroundColor: 'rgba(244,63,94,0.65)',
+                            hoverBackgroundColor: 'rgba(244,63,94,0.9)',
+                            borderRadius: 6,
+                            maxBarThickness: 38,
+                            yAxisID: 'y',
+                        },
+                        {
+                            type: 'line',
+                            label: 'Unidades',
+                            data: qtds,
+                            borderColor: CORES.amber,
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 3,
+                            pointBackgroundColor: CORES.amber,
+                            tension: 0.35,
+                            yAxisID: 'y1',
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(2,6,23,0.95)',
+                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: c => c.dataset.type === 'line'
+                                    ? ' ' + fmtQtd(c.parsed.y) + ' un.'
+                                    : ' ' + fmtMoeda(c.parsed.y, 0),
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { maxRotation: 0 } },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { callback: v => fmtCompacto(v) },
+                        },
+                        y1: {
+                            beginAtZero: true,
+                            position: 'right',
+                            grid: { display: false },
+                            ticks: { callback: v => fmtQtd(v) },
+                        },
+                    },
+                },
+            });
+        }
+
+        function renderizarExposicao() {
+            destruirChart('exposicao');
+            const k = state.dados.kpis;
+            const partes = [
+                { rotulo: 'Já vencido', valor: k.vencido_valor, cor: CORES.rose },
+                { rotulo: '0 a 30 dias', valor: k.d30_valor, cor: CORES.orange },
+                { rotulo: '31 a 60 dias', valor: k.d60_valor, cor: CORES.amber },
+                { rotulo: '61 a 90 dias', valor: k.d90_valor, cor: CORES.teal },
+            ];
+            const total = partes.reduce((s, p) => s + p.valor, 0);
+            state.charts.exposicao = new Chart(document.getElementById('chart-exposicao'), {
+                type: 'doughnut',
+                data: {
+                    labels: partes.map(p => p.rotulo),
+                    datasets: [{
+                        data: partes.map(p => p.valor),
+                        backgroundColor: partes.map(p => p.cor),
+                        borderColor: '#0b0b10',
+                        borderWidth: 3,
+                        hoverOffset: 6,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(2,6,23,0.95)',
+                            callbacks: {
+                                label: c => ' ' + c.label + ': ' + fmtMoeda(c.parsed, 0) +
+                                    ' (' + (total ? ((c.parsed / total) * 100).toFixed(1) : '0') + '%)',
+                            },
+                        },
+                    },
+                },
+            });
+            document.getElementById('exposicao-legenda').innerHTML = partes.map(p => `
+                <div class="flex items-center justify-between gap-2 text-[11px]">
+                    <span class="flex items-center gap-2 text-slate-400">
+                        <span class="w-2 h-2 rounded-full" style="background:${p.cor}"></span>${p.rotulo}
+                    </span>
+                    <span class="font-semibold text-slate-200 num">${fmtCompacto(p.valor)}</span>
+                </div>`).join('');
+        }
+
+        function renderizarConversao() {
+            destruirChart('conversao');
+            const k = state.dados.kpis;
+            const outras = Math.max(0, k.prevencao_movimentada - k.prevencao_vendidas - k.prevencao_baixadas);
+            document.getElementById('conversao-centro').innerText = fmtPct(k.conversao_pct);
+            document.getElementById('conv-vendidas').innerText = fmtQtd(k.prevencao_vendidas) + ' un.';
+            document.getElementById('conv-baixadas').innerText = fmtQtd(k.prevencao_baixadas) + ' un.';
+            document.getElementById('conv-outras').innerText = fmtQtd(outras) + ' un.';
+            document.getElementById('conv-valor').innerText = fmtCompacto(k.prevencao_valor_vendido);
+            state.charts.conversao = new Chart(document.getElementById('chart-conversao'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Vendidas', 'Baixadas', 'Outras saídas'],
+                    datasets: [{
+                        data: [k.prevencao_vendidas, k.prevencao_baixadas, outras],
+                        backgroundColor: [CORES.emerald, CORES.rose, CORES.slate],
+                        borderColor: '#0b0b10',
+                        borderWidth: 3,
+                        hoverOffset: 5,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '78%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(2,6,23,0.95)',
+                            callbacks: {
+                                label: c => ' ' + c.label + ': ' + fmtQtd(c.parsed) + ' un.',
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        function renderizarSemVenda() {
+            destruirChart('semVenda');
+            const dias = state.dados.periodo.dias_sem_venda;
+            const k = state.dados.kpis;
+            document.getElementById('titulo-sem-venda').innerText = 'Estoque sem venda há ' + dias + ' dias';
+            document.getElementById('subtitulo-sem-venda').innerText = 'Top 12 lojas por valor parado';
+            document.getElementById('sem-venda-total').innerText = fmtCompacto(k.sem_venda_valor);
+            document.getElementById('sem-venda-total-sub').innerText =
+                fmtNumero(k.sem_venda_lotes) + ' lotes · ' + fmtQtd(k.sem_venda_qtd) + ' un.';
+            document.getElementById('titulo-top-sem-venda').innerText = 'Sem venda há ' + dias + ' dias';
+
+            const top = [...state.dados.lojas]
+                .filter(l => l.sem_venda_valor > 0)
+                .sort((a, b) => b.sem_venda_valor - a.sem_venda_valor)
+                .slice(0, 12);
+            state.charts.semVenda = new Chart(document.getElementById('chart-sem-venda'), {
+                type: 'bar',
+                data: {
+                    labels: top.map(l => 'Loja ' + l.codigo),
+                    datasets: [{
+                        label: 'Valor parado',
+                        data: top.map(l => l.sem_venda_valor),
+                        backgroundColor: 'rgba(251,146,60,0.65)',
+                        hoverBackgroundColor: 'rgba(251,146,60,0.95)',
+                        borderRadius: 5,
+                        maxBarThickness: 22,
+                    }],
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(2,6,23,0.95)',
+                            callbacks: {
+                                label: c => ' ' + fmtMoeda(c.parsed.x, 0),
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { callback: v => fmtCompacto(v) },
+                        },
+                        y: { grid: { display: false } },
+                    },
+                },
+            });
+        }
+
+        function popularSelectsLojas() {
+            const selects = [
+                document.getElementById('select-loja-mensal'),
+                document.getElementById('select-loja-itens'),
+            ];
+            const lojas = [...state.dados.lojas].sort((a, b) => a.codigo.localeCompare(b.codigo, 'pt-BR', { numeric: true }));
+            selects.forEach(sel => {
+                const atual = sel.value;
+                sel.innerHTML = '<option value="todas">Todas as lojas</option>' +
+                    lojas.map(l => `<option value="${l.codigo}">Loja ${l.codigo}</option>`).join('');
+                if (lojas.some(l => l.codigo === atual)) sel.value = atual;
+            });
+        }
+
+        function mesesDaMatriz() {
+            const meses = new Set(state.dados.vencimentos_mensal.map(r => r.mes));
+            const base = new Date();
+            base.setDate(1);
+            for (let i = 0; i < 12; i++) {
+                const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+                meses.add(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+            }
+            return [...meses].sort();
+        }
+
+        function renderMatriz() {
+            const filtro = document.getElementById('select-loja-mensal').value;
+            const meses = mesesDaMatriz();
+            const lojasMap = {};
+            state.dados.lojas.forEach(l => { lojasMap[l.codigo] = l.nome || ''; });
+
+            const mapa = {};
+            state.dados.vencimentos_mensal.forEach(r => {
+                if (filtro !== 'todas' && r.loja !== filtro) return;
+                if (!mapa[r.loja]) mapa[r.loja] = { total: 0, meses: {} };
+                mapa[r.loja].meses[r.mes] = (mapa[r.loja].meses[r.mes] || 0) + r.valor;
+                mapa[r.loja].total += r.valor;
+            });
+
+            const linhas = Object.keys(mapa)
+                .map(codigo => ({ codigo, total: mapa[codigo].total, meses: mapa[codigo].meses }))
+                .filter(l => l.total > 0)
+                .sort((a, b) => b.total - a.total);
+
+            let maxCelula = 1;
+            linhas.forEach(l => meses.forEach(m => { maxCelula = Math.max(maxCelula, l.meses[m] || 0); }));
+
+            document.getElementById('matriz-head').innerHTML =
+                '<th class="px-3 py-3 text-left sticky left-0 bg-slate-950/95 z-20 min-w-[150px]">Loja</th>' +
+                meses.map(m => `<th class="px-2 py-3 text-right min-w-[76px]">${fmtMes(m)}</th>`).join('') +
+                '<th class="px-3 py-3 text-right min-w-[90px]">Total</th>';
+
+            document.getElementById('matriz-corpo').innerHTML = linhas.map(l => {
+                const celulas = meses.map(m => {
+                    const v = l.meses[m] || 0;
+                    const ratio = v > 0 ? Math.pow(v / maxCelula, 0.62) : 0;
+                    const bg = v > 0 ? `rgba(244,63,94,${(0.08 + ratio * 0.62).toFixed(3)})` : 'transparent';
+                    const cor = ratio > 0.5 ? '#fff' : '#cbd5e1';
+                    const titulo = v > 0 ? fmtMes(m) + ': ' + fmtMoeda(v, 0) : 'Sem vencimento no mês';
+                    return `<td class="heat-cell px-2 py-2.5 text-right num" style="background:${bg};color:${v ? cor : '#334155'}" title="${titulo}">${v ? fmtValorCelula(v) : '·'}</td>`;
+                }).join('');
+                return `<tr class="border-t border-white/5 hover:bg-white/[0.025]">
+                    <td class="px-3 py-2.5 sticky left-0 bg-[#0b0b11]/95 backdrop-blur z-10">
+                        <span class="font-bold text-slate-200">Loja ${l.codigo}</span>
+                        <span class="block text-[9px] text-slate-500 truncate max-w-[140px]">${lojasMap[l.codigo] || ''}</span>
+                    </td>
+                    ${celulas}
+                    <td class="px-3 py-2.5 text-right font-bold text-white num">${fmtCompacto(l.total)}</td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="' + (meses.length + 2) + '" class="px-4 py-8 text-center text-slate-500">Sem vencimentos projetados para o filtro selecionado.</td></tr>';
+
+            const totaisMes = meses.map(m => linhas.reduce((s, l) => s + (l.meses[m] || 0), 0));
+            const totalGeral = linhas.reduce((s, l) => s + l.total, 0);
+            document.getElementById('matriz-total').innerHTML = `<tr class="border-t border-white/15">
+                <td class="px-3 py-3 sticky left-0 bg-slate-950/95 font-bold text-slate-300 z-10">Total</td>
+                ${totaisMes.map(v => `<td class="px-2 py-3 text-right font-bold num ${v ? 'text-rose-300' : 'text-slate-600'}">${v ? fmtValorCelula(v) : '·'}</td>`).join('')}
+                <td class="px-3 py-3 text-right font-black text-white num">${fmtCompacto(totalGeral)}</td>
+            </tr>`;
+        }
+
+        function classeNivel(nivel) {
+            if (nivel === 'Crítico') return 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+            if (nivel === 'Alto') return 'bg-orange-500/15 text-orange-300 border-orange-500/30';
+            if (nivel === 'Médio') return 'bg-amber-500/10 text-amber-300 border-amber-500/25';
+            return 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20';
+        }
+
+        function renderRanking() {
+            const lojas = state.dados.lojas;
+            state.maxScore = Math.max(1, ...lojas.map(l => l.risco_score));
+            document.getElementById('badge-criticas').innerText =
+                state.dados.kpis.lojas_criticas + ' críticas · ' + state.dados.kpis.lojas_intervencao + ' em atenção';
+            document.getElementById('ranking-corpo').innerHTML = lojas.map((l, i) => {
+                const linhaClasse = l.risco_nivel === 'Crítico' ? 'risk-critical'
+                    : l.risco_nivel === 'Alto' ? 'risk-high' : '';
+                const largura = Math.min(100, (l.risco_score / state.maxScore) * 100);
+                const corBarra = l.risco_nivel === 'Crítico' ? 'bg-rose-500'
+                    : l.risco_nivel === 'Alto' ? 'bg-orange-400'
+                    : l.risco_nivel === 'Médio' ? 'bg-amber-400' : 'bg-emerald-500';
+                const sinais = (l.motivos || []).map(m => `<span class="inline-block text-[9px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-slate-400 mr-1 mb-1">${m}</span>`).join('') || '<span class="text-slate-600">—</span>';
+                return `<tr class="border-t border-white/5 hover:bg-white/[0.03] ${linhaClasse}">
+                    <td class="px-3 py-3 text-slate-500 font-bold num">${i + 1}</td>
+                    <td class="px-3 py-3">
+                        <span class="font-bold text-white">Loja ${l.codigo}</span>
+                        <span class="block text-[9px] text-slate-500 truncate max-w-[160px]">${l.nome || ''}</span>
+                    </td>
+                    <td class="px-3 py-3"><span class="text-[9px] font-bold px-2 py-1 rounded-lg border ${classeNivel(l.risco_nivel)}">${l.risco_nivel}</span></td>
+                    <td class="px-3 py-3">
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div class="h-full rounded-full ${corBarra}" style="width:${largura}%"></div>
+                            </div>
+                            <span class="text-[10px] font-bold text-slate-300 num w-8 text-right">${l.risco_score.toFixed(1)}</span>
+                        </div>
+                    </td>
+                    <td class="px-3 py-3 text-right num ${l.vencido_valor > 0 ? 'text-rose-300 font-bold' : 'text-slate-600'}">${l.vencido_valor ? fmtCompacto(l.vencido_valor) : '—'}</td>
+                    <td class="px-3 py-3 text-right num ${l.d30_valor > 0 ? 'text-orange-300 font-semibold' : 'text-slate-600'}">${l.d30_valor ? fmtCompacto(l.d30_valor) : '—'}</td>
+                    <td class="px-3 py-3 text-right num text-slate-300">${l.sem_venda_valor ? fmtCompacto(l.sem_venda_valor) : '—'}</td>
+                    <td class="px-3 py-3 text-right num font-semibold ${l.conversao_pct >= 70 ? 'text-emerald-300' : l.conversao_pct >= 40 ? 'text-amber-300' : 'text-rose-300'}">${l.prevencao_movimentada ? fmtPct(l.conversao_pct) : '—'}</td>
+                    <td class="px-3 py-3 max-w-[260px]">${sinais}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderTopItens() {
+            const filtro = document.getElementById('select-loja-itens').value;
+            const vencendo = state.dados.top_vencendo.filter(i => filtro === 'todas' || i.loja === filtro);
+            const semVenda = state.dados.top_sem_venda.filter(i => filtro === 'todas' || i.loja === filtro);
+
+            document.getElementById('top-vencendo-corpo').innerHTML = vencendo.slice(0, 200).map(i => {
+                let badge;
+                if (i.dias < 0) badge = '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">Vencido ' + Math.abs(i.dias) + 'd</span>';
+                else if (i.dias <= 15) badge = '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/25">' + i.dias + 'd</span>';
+                else if (i.dias <= 30) badge = '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-300 border border-orange-500/25">' + i.dias + 'd</span>';
+                else badge = '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 border border-white/10">' + i.dias + 'd</span>';
+                return `<tr class="border-t border-white/5 hover:bg-white/[0.03]">
+                    <td class="px-3 py-2.5 font-bold text-slate-300">${i.loja}</td>
+                    <td class="px-3 py-2.5">
+                        <span class="block text-slate-200 truncate max-w-[280px]" title="${i.descricao}">${i.descricao}</span>
+                        <span class="text-[9px] text-slate-500">Lote ${i.lote}</span>
+                    </td>
+                    <td class="px-3 py-2.5 whitespace-nowrap">
+                        <span class="block text-slate-400 num">${fmtDataBR(i.validade)}</span>
+                        ${badge}
+                    </td>
+                    <td class="px-3 py-2.5 text-right num text-slate-300">${fmtQtd(i.qtd)}</td>
+                    <td class="px-3 py-2.5 text-right num font-bold text-slate-100">${fmtCompacto(i.valor)}</td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">Nenhum item vencendo no filtro selecionado.</td></tr>';
+
+            document.getElementById('top-sem-venda-corpo').innerHTML = semVenda.slice(0, 200).map(i => `
+                <tr class="border-t border-white/5 hover:bg-white/[0.03]">
+                    <td class="px-3 py-2.5 font-bold text-slate-300">${i.loja}</td>
+                    <td class="px-3 py-2.5">
+                        <span class="block text-slate-200 truncate max-w-[240px]" title="${i.descricao}">${i.descricao}</span>
+                        <span class="text-[9px] text-slate-500">Lote ${i.lote}</span>
+                    </td>
+                    <td class="px-3 py-2.5 whitespace-nowrap">
+                        <span class="block text-slate-400 num">${fmtDataBR(i.validade)}</span>
+                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 border border-white/10">${i.dias}d</span>
+                    </td>
+                    <td class="px-3 py-2.5 text-right num text-slate-300">${fmtQtd(i.qtd)}</td>
+                    <td class="px-3 py-2.5 text-right num font-bold text-slate-100">${fmtCompacto(i.valor)}</td>
+                </tr>`).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">Nenhum item parado no filtro selecionado.</td></tr>';
+
+            const semLote = state.dados.top_sem_lote.filter(i => filtro === 'todas' || i.loja === filtro);
+            document.getElementById('top-sem-lote-corpo').innerHTML = semLote.slice(0, 200).map(i => `
+                <tr class="border-t border-white/5 hover:bg-white/[0.03]">
+                    <td class="px-3 py-2.5 font-bold text-slate-300">${i.loja}</td>
+                    <td class="px-3 py-2.5 text-slate-400 num whitespace-nowrap">${fmtDataBR(i.data)}</td>
+                    <td class="px-3 py-2.5"><span class="block text-slate-200 truncate max-w-[300px]" title="${i.descricao}">${i.descricao}</span></td>
+                    <td class="px-3 py-2.5"><span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20">${i.categoria}</span></td>
+                    <td class="px-3 py-2.5 text-right num text-slate-300">${fmtQtd(i.qtd)}</td>
+                    <td class="px-3 py-2.5 text-right num font-bold text-slate-100">${fmtCompacto(i.valor)}</td>
+                </tr>`).join('') || '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">Nenhuma venda sem vínculo de lote no filtro selecionado.</td></tr>';
+        }
+
+        function renderizarNotas() {
+            const el = document.getElementById('notas-metodologicas');
+            el.innerHTML = state.dados.observacoes.map(o => '<li>' + o + '</li>').join('');
+        }
+
+        function inicializar() {
+            document.getElementById('data-inicio').value = isoDiasAtras(90);
+            document.getElementById('data-fim').value = isoHoje();
+            document.getElementById('data-inicio').addEventListener('keydown', e => { if (e.key === 'Enter') carregarDados(false); });
+            document.getElementById('data-fim').addEventListener('keydown', e => { if (e.key === 'Enter') carregarDados(false); });
+            popularCategorias();
+            carregarDados(false);
+            atualizarIndicadorCache();
+            setInterval(atualizarIndicadorCache, 60000);
+        }
+
+        inicializar();
+    </script>
+</body>
+</html>
